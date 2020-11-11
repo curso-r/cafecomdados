@@ -1,0 +1,14 @@
+Package: cafecomdados
+Title: Códigos do episódio dO Café com Dados do dia 14/11/2020
+Version: 1.0
+Authors@R: 
+    person(given = "Athos",
+           family = "Damiani",
+           role = c("aut", "cre"),
+           email = "athos.damiani@curso-r.com")
+Description: Códigos do episódio dO Café com Dados do dia 14/11/2020.
+License: MIT + file LICENSE
+Encoding: UTF-8
+LazyData: true
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.1.1
