@@ -1,0 +1,8 @@
+pandoc: 2.7.3
+pkgdown: 1.5.1
+pkgdown_sha: ~
+articles:
+  cafe_com_dados_eda: cafe_com_dados_eda.html
+  cafe_com_dados_modelage: cafe_com_dados_modelage.html
+last_built: 2020-11-14T07:43Z
+

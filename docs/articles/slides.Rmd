@@ -1,0 +1,102 @@
+---
+title: "Curso-R no Café com Dados"
+subtitle: "Machine Learning com {tidymodels}"
+author: "<img src = 'https://d33wubrfki0l68.cloudfront.net/9b0699f18268059bdd2e5c21538a29eade7cbd2b/67e5c/img/logo/cursor1-5.png' width = '40%'>"
+date: "`r Sys.Date()`"
+output:
+  xaringan::moon_reader:
+    lib_dir: libs
+    css: ["default", "default-fonts", "css/custom.css", "css/curso-r-bg.css", "css/xaringan-themer.css"]
+    nature:
+      highlightStyle: github
+      highlightLines: true
+      countIncrementalSlides: false
+      ratio: "16:9"
+---
+
+```{r setup, include=FALSE}
+library(ggplot2)
+library(magrittr)
+library(knitr)
+library(tidymodels)
+library(tidyverse)
+library(kableExtra)
+theme_set(theme_minimal(14))
+options(htmltools.dir.version = FALSE, fig.retina = 2)
+
+```
+
+
+
+# Curso-R
+
+<img src="img/professores.png" style=" display: block; margin-left: auto; margin-right: auto;" width = 75% ></img>
+
+---
+
+## Linha do tempo
+
+<center>
+<img src="img/linha_do_tempo.png" width = 35%></img>
+</center>
+
+
+---
+
+## Comunidade
+
+### [Nosso discourse: https://discourse.curso-r.com/](https://discourse.curso-r.com/).
+
+- Todos os profs da Curso-R por lá.
+
+- Mais pessoas acompanhando e respondendo as dúvidas.
+
+- Em um ambiente aberto, as suas dúvidas vão ficar registradas, ou seja, vai contribuir com a comunidade.
+
+- Muito melhor para escrever textos que possuem códigos. Com ele, podemos usar o pacote `{reprex}`!
+
+
+---
+
+## Nosso Livro
+
+<a href = "https://livro.curso-r.com/">
+<img src="https://github.com/curso-r/assets/blob/master/ggg.png?raw=true" style=" display: block; margin-left: auto; margin-right: auto;width:400px;"></img>
+</a>
+
+---
+
+## Nossos cursos
+
+```{r, echo = FALSE}
+tab <- templatesR6::cursos
+
+criar_bloco_cursos <- function (bloco_nome, tab) 
+{
+    cursos <- tab %>% dplyr::filter(curso_tipo == bloco_nome) %>% 
+        dplyr::pull(curso_nome)
+    urls <- tab %>% dplyr::filter(curso_tipo == bloco_nome) %>% 
+        dplyr::pull(curso_url)
+    cor <- switch(bloco_nome, `Programação em R` = "#3bb44a", 
+        Modelagem = "#996699", `Extração de dados` = "#eeba30", 
+        `Comunicação e automação` = "#ff6699")
+    shiny::tags$div(class = "container center", shiny::tags$div(class = "card", 
+        shiny::tags$h2(bloco_nome, style = "font-size: 28px;"), shiny::hr(style = paste0("background-color:", 
+            cor, ";")), purrr::map2(cursos, urls, templatesR6:::criar_hyperlink_curso)))
+}
+```
+
+```{r, echo = FALSE}
+shiny::tags$div(
+  shiny::tags$div(class = "pull-left", 
+                  criar_bloco_cursos("Programação em R", tab), 
+                  shiny::tags$br(), 
+                  criar_bloco_cursos("Comunicação e automação", tab)), 
+  shiny::tags$div(class = "pull-right", 
+                  criar_bloco_cursos("Modelagem", tab), 
+                  shiny::tags$br(), 
+                  criar_bloco_cursos("Extração de dados", tab))
+  )
+```
+
+
