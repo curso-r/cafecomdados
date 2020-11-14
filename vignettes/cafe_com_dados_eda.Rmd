@@ -1,0 +1,225 @@
+---
+title: "Análise Exploratória"
+subtitle: "Café Com Dados - Turnover com {tidymodels}"
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  message = FALSE,
+  warning = FALSE,
+  echo = FALSE
+)
+```
+
+# Importação e Pacotes
+
+```{r setup}
+library(tidytext)
+library(patchwork)
+library(rlang)
+library(janitor)
+library(reactable)
+library(sparkline)
+library(highcharter)
+library(skimr)
+library(naniar)
+library(ggalluvial)
+library(correlation)
+library(tidyverse)
+
+library(cafecomdados) # dados e nossas funcoes
+
+theme_set(theme_light(18)) 
+```
+
+# Análise Expliratória (EDA)
+
+Coisas para verificar:
+
+- **Coisas univariadas**
+  - Tipo correto das variáveis
+  - Colunas constantes
+  - Colunas quase constantes/categorias raras (principalmente da variávei resposta, é desbalanceada?)
+  - Alta cardinalidade (muitas categorias)
+  - Valores discrepantes (outliers)
+  - Valores faltantes (missings)
+  - Assimetria
+  - Escala
+- **Coisas multivariadas**
+  - Associação/correlação entre variáveis explicativas
+  - Combinações lineares entre explicativas
+  - Relação entre explicativas e resposta
+
+## Olhada na base
+
+```{r}
+glimpse(turnover)
+```
+```{r}
+skim(turnover)
+```
+
+## Sumaŕio - Variáveis Categóricas
+
+```{r}
+sumario_character <- turnover %>%
+  select(where(is.character)) %>%
+  as.list() %>%
+  enframe(name = "variavel", value = "valores") %>%
+  mutate(
+    n_missing = map_dbl(valores, ~sum(is.na(.x))),
+    complete_rate = 1 - n_missing/map_dbl(valores, ~length(.x)),
+    min = map_dbl(valores, ~min(str_length(.x))),
+    max = map_dbl(valores, ~max(str_length(.x))),
+    # empty = map_dbl(valores, ~sum(str_detect("^$", .x))),
+    n_unique = map_dbl(valores, ~n_distinct(.x)),
+    whitespace = map_dbl(valores, ~sum(str_detect("^[:blank:]+$", .x)))
+  ) %>%
+  arrange(variavel != "desligado") 
+
+sumario_character %>%
+  reactable(
+    wrap = FALSE, 
+    resizable = TRUE,
+    fullWidth = TRUE,
+    defaultColDef = colDef(width = 60),
+    columns = list(
+      valores = colDef(show = FALSE),
+      variavel = colDef("Variável", minWidth = 230, width = 230)
+    ),
+    details = function(index) {
+      variavel_chr <- sumario_character[index, "variavel", drop = TRUE]
+      turnover %>%
+        tabyl(!!sym(variavel_chr)) %>%
+        reactable(columns = list(percent = colDef("%", format = colFormat(percent = TRUE, digits = 1))), width = 500)
+    }
+  )
+```
+
+
+## Sumaŕio - Variáveis Numéricas
+
+```{r}
+sumario_numeric <- turnover %>%
+  select(where(is.numeric)) %>%
+  as.list() %>%
+  enframe(name = "variavel", value = "valores") %>%
+  mutate(
+    n_missing = map_dbl(valores, ~sum(is.na(.x))),
+    complete_rate = 1 - n_missing/map_dbl(valores, ~length(.x)),
+    mean = map_dbl(valores, ~mean(.x)),
+    sd = map_dbl(valores, ~sd(.x)),
+    min = map_dbl(valores, ~min(.x)),
+    median = map_dbl(valores, ~median(.x)),
+    max = map_dbl(valores, ~max(.x))
+  ) %>%
+  mutate(across(where(is.numeric), round, digits = 1))
+
+sumario_numeric %>%
+  reactable(
+    wrap = FALSE, 
+    resizable = TRUE,
+    fullWidth = TRUE,
+    defaultColDef = colDef(width = 60),
+    columns = list(
+      valores = colDef(cell = function(values) {sparkline(table(cut(values, min(n_distinct(values), 15))), type = "bar")}),
+      variavel = colDef("Variável", minWidth = 230, width = 230)
+    ),
+    details = function(index) {
+      hchart(sumario_numeric[index, "valores"][[1]][[1]])
+    }
+  )
+```
+
+## Relação entre as explicativas
+
+### Correlações entre as numéricas
+
+```{r}
+turnover %>% select(where(is.numeric)) %>% cor() %>% hchart_corr()
+# library(corrr)
+# turnover %>% select(where(is.numeric)) %>% correlate() %>% shave()
+
+# library(corrplot)
+# turnover %>% select(where(is.numeric)) %>% cor() %>% corrplot( method="color", order = "hclust", type="upper", addCoef.col = "purple")
+```
+
+### Sankey das explicativas categóricas
+
+```{r, fig.width=8, fig.height=5}
+turnover %>%
+  select(where(is.character), -desligado) %>%
+  data_to_sankey() %>%
+  hchart("sankey")
+```
+
+## Relação com a variável resposta
+
+```{r}
+turnover_numeric_long <- turnover %>%
+  select(where(is.numeric), desligado) %>%
+  pivot_longer(-desligado, names_to = "variavel", values_to = "valor")
+```
+
+### Variáveis numéricas
+
+```{r, fig.height=10, fig.width=10}
+# plot base
+plot_base <- turnover_numeric_long %>%
+  ggplot(aes(x = valor)) +
+  facet_wrap(~variavel, scale = "free", ncol = 1) +
+  theme(axis.text = element_blank(),
+        axis.title = element_blank())
+
+#### Histogramas
+p1 <- plot_base + geom_histogram(aes(fill = desligado), position = "identity")
+
+#### Densidades
+p2  <- plot_base + geom_density(aes(fill = desligado), alpha = 0.4, show.legend = FALSE)
+
+#### Boxplots
+p3 <- plot_base + geom_boxplot(aes(fill = desligado), show.legend = FALSE)
+
+#### KS
+p4 <- plot_base + stat_ecdf(aes(colour = desligado), show.legend = FALSE)
+
+(p4 + p3 + p2 + p1) + plot_layout(nrow = 1)
+```
+
+### Variáveis categóricas
+
+```{r}
+turnover_character_long <- turnover %>%
+  select(where(is.character), desligado) %>%
+  pivot_longer(-desligado, names_to = "variavel", values_to = "valor")
+```
+
+```{r, fig.height=10, fig.width=10}
+# bar plot base
+bar_plot <- turnover_character_long %>%
+  count(variavel, valor, desligado) %>%
+  group_by(variavel, valor) %>%
+  mutate(
+    p_desligados = sum(n[desligado == "sim"], na.rm = TRUE)/sum(n, na.rm = TRUE)
+  ) %>%
+  group_by(variavel) %>%
+  mutate(
+    valor = reorder_within(valor, p_desligados, variavel)
+  ) %>%
+  ggplot(aes(y = valor, x = n, fill = desligado)) +
+  facet_wrap(~variavel, scales = "free", ncol = 1) +
+  scale_y_reordered() +
+  theme(axis.text.x = element_blank(),
+        axis.title = element_blank())
+
+#### Position stack
+p1 <- bar_plot + geom_col(show.legend = FALSE, position = "stack")
+
+#### Position fill
+p2 <- bar_plot + geom_col(show.legend = TRUE, position = "fill")
+
+p1 + p2
+```
+

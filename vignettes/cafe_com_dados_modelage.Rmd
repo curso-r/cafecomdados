@@ -1,0 +1,274 @@
+---
+title: "Modelagem com {tidymodels}"
+subtitle: "Café Com Dados - Turnover com {tidymodels}"
+---
+
+```{r, include = FALSE}
+knitr::opts_chunk$set(
+  collapse = TRUE,
+  comment = "#>",
+  message = FALSE,
+  warning = FALSE,
+  echo = TRUE
+)
+```
+
+```{r setup}
+library(tictoc)
+library(pROC)
+library(vip)
+library(tidymodels) # ML framework
+library(cafecomdados)
+library(knitr)
+library(patchwork)
+theme_set(theme_light(18)) 
+```
+
+# Base de treino/teste
+
+```{r, echo=TRUE}
+set.seed(1)
+split_inicial <- initial_split(turnover, strata = "desligado")
+```
+
+# Dataprep
+
+```{r, echo=TRUE}
+library(embed)
+receita <- recipe(desligado ~ ., training(split_inicial)) %>%
+  step_mutate(
+    aleatorio = runif(n())
+  ) %>%
+  step_corr(all_numeric()) %>%
+  step_zv(all_predictors()) %>%
+  step_normalize(all_numeric()) %>%
+  step_woe(area, outcome = "desligado") %>%
+  step_dummy(all_nominal(), -all_outcomes())
+```
+
+Olhadela na base processada:
+
+```{r}
+baked <- bake(prep(receita), new_data = NULL)
+glimpse(baked)
+```
+
+# Modelo
+
+## especificação da f(x)
+
+Definir:
+
+- A $f(x)$: random forest, regressão, xgboost, redes neurais, etc.
+- O modo (ou tarefa): `classification` ou `regression`
+- A engine: pacote do R que vai ajustar o modelo.
+
+```{r, echo=TRUE}
+modelo <- rand_forest(
+  trees = 300, 
+  mtry = tune(), 
+  min_n = tune()
+) %>%
+  set_mode("classification") %>% 
+  set_engine("ranger", importance = "impurity", num.threads = 8)
+```
+
+## Workflow
+
+Um workflow é um objeto que une o modelo com a receita.
+
+```{r, echo=TRUE}
+wf <- workflow() %>%
+  add_model(modelo) %>%
+  add_recipe(receita)
+
+wf
+```
+
+# Tunagem de hiperparâmetros
+
+Objetivo: achar o melhor par de valores dos hiperparâmertros. Neste exemplo, para `mtry` e `min_n`.
+
+## Reamostragens
+
+Estratégia de reamostragens: cross-validation, bootstrap, etc. No exemplo será cross-validation com 3 folds.
+
+```{r}
+# 5 folds de cross-validation
+set.seed(1)
+reamostragens <- vfold_cv(training(split_inicial), v = 3)
+```
+
+## Grid de hiperparâmetros (opcional)
+
+```{r}
+grade <- expand.grid(
+  mtry = c(1, 2, 3, 5),
+  min_n = 2^c(2, 4, 6)
+)
+```
+
+## Tunagem
+
+```{r tunagem, cache = TRUE}
+set.seed(1)
+tic("modelo rf")
+tunagem <- tune_grid(
+  wf,
+  resamples = reamostragens,
+  grid = grade,
+  metrics = metric_set(roc_auc, precision, accuracy, f_meas),
+  control = control_grid(verbose = TRUE, allow_par = FALSE)
+)
+toc()
+```
+
+## Avaliações
+
+```{r, fig.height=6}
+# gráfico
+autoplot(tunagem)
+
+# tabela
+show_best(tunagem, "roc_auc") %>% kable(digits = 3)
+```
+
+# Desempenho do modelo final
+
+Hora de ajustar o modelo na base de treino e avaliar na base de teste para reportar o desempenho esperado.
+
+## Atualização do workflow
+
+atualiza o workflow com os hiperparametros encontrados
+
+```{r}
+wf <- wf %>% finalize_workflow(select_best(tunagem, "roc_auc"))
+wf
+```
+
+## Ajuste
+
+```{r}
+# last fit
+ajuste_final <- last_fit(wf, split_inicial, metrics = metric_set(accuracy, roc_auc, f_meas, specificity, precision, recall))
+
+# métricas de desempenho
+collect_metrics(ajuste_final)
+```
+
+
+```{r}
+# predicoes
+predicoes_na_base_teste <- collect_predictions(ajuste_final)
+
+# curva roc
+roc <- predicoes_na_base_teste %>% 
+  roc_curve(desligado, .pred_não) %>%
+  autoplot()
+
+# curva de lift
+lift <- predicoes_na_base_teste %>% 
+  lift_curve(desligado, .pred_não) %>%
+  autoplot()
+
+# KS
+ks <- predicoes_na_base_teste %>% 
+  ggplot(aes(x = .pred_sim, colour = desligado)) +
+  stat_ecdf(show.legend = FALSE)
+  
+# distribuicao
+dist <- predicoes_na_base_teste %>% 
+  ggplot(aes(x = .pred_sim, fill = desligado)) +
+  geom_density() +
+  theme(axis.title = element_blank())
+  
+(roc + lift)/(ks + dist)
+```
+
+# Modelo final
+
+## Ajuste final com a base inteira
+
+```{r}
+modelo_final <- fit(wf, turnover)
+```
+
+## Importância das variáveis
+
+```{r}
+vip(modelo_final$fit$fit) + aes(fill = cumsum(Variable == "aleatorio"))
+```
+
+## Efeito marginal (com ICE customizado)
+
+```{r ice, cache=TRUE}
+library(prediction)
+# ICE 
+ice_df <- function(data, var) {
+  baked <- bake(extract_recipe(modelo_final), data) %>% rowid_to_column("id")
+  cols <- c(setdiff(names(baked), names(data)), "id")
+  data <- data %>% left_join(baked %>% select(all_of(cols)), by = "id")
+  var_str <- rlang::as_name(rlang::enquo(var))
+  var_vec <- data %>% pull({{var}})
+  var_vec_unique <- unique(var_vec)
+  n_distincts <- length(var_vec_unique)
+  
+  sequencia_ice <- if(n_distincts > 20) seq_range(var_vec_unique[var_vec_unique < quantile(var_vec_unique, 0.9)], 20) else var_vec_unique
+
+  grid <- data %>% tidyr::expand(id, {{var}} := sequencia_ice)
+  data <- data %>%
+    dplyr::select(-{{var}}) %>%
+    left_join(grid, by = "id") %>%
+    mutate(
+      pred = predict(modelo_final, new_data = ., type = "prob")$.pred_sim,
+      variavel = var_str,
+      sequencia_ice = {{var}}
+    )
+  
+  if(!is.numeric(data$sequencia_ice))
+    data$sequencia_ice <- as.numeric(factor(data$sequencia_ice))
+  
+  data
+}
+
+ice_df_full <- bind_rows(
+  testing(split_inicial) %>% rowid_to_column("id") %>% ice_df(nivel_satisfacao),
+  testing(split_inicial) %>% rowid_to_column("id") %>% ice_df(tempo_empresa),
+  testing(split_inicial) %>% rowid_to_column("id") %>% ice_df(aleatorio),
+  testing(split_inicial) %>% rowid_to_column("id") %>% ice_df(atuacao_projetos),
+  testing(split_inicial) %>% rowid_to_column("id") %>% ice_df(horas_trabalhadas),
+  testing(split_inicial) %>% rowid_to_column("id") %>% ice_df(ultima_avaliacao)
+) 
+
+ice_df_full %>%
+  ggplot(aes(x = sequencia_ice, y = pred)) +
+  geom_line(alpha = 0.01, aes(group = id)) +
+  stat_smooth(se = FALSE) +
+  stat_summary(se = FALSE, geom = "point", fun = "mean") +
+  facet_wrap(~variavel, scales = "free_x")
+```
+
+# Predição
+
+```{r}
+novo_funcionario <- data.frame(
+  nivel_satisfacao = 0.5,
+  ultima_avaliacao = 0.9,
+  atuacao_projetos = 4,
+  horas_trabalhadas = 220,
+  tempo_empresa = 1,
+  licenca_medica = "não licenciado",
+  promocao_ultimos_3_anos = "não promovido",
+  area = "comercial",
+  salario = "baixo"
+)
+
+predict(modelo_final, new_data = novo_funcionario, type = "prob")
+```
+
+# Armazenamento
+
+```{r}
+usethis::use_data(modelo_final, overwrite = TRUE)
+```
+
