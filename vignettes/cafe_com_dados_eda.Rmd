@@ -34,14 +34,14 @@ library(cafecomdados) # dados e nossas funcoes
 theme_set(theme_light(18)) 
 ```
 
-# Análise Expliratória (EDA)
+# Análise Exploratória (EDA)
 
 Coisas para verificar:
 
 - **Coisas univariadas**
   - Tipo correto das variáveis
   - Colunas constantes
-  - Colunas quase constantes/categorias raras (principalmente da variávei resposta, é desbalanceada?)
+  - Colunas quase constantes/categorias raras (principalmente da variável resposta, é desbalanceada?)
   - Alta cardinalidade (muitas categorias)
   - Valores discrepantes (outliers)
   - Valores faltantes (missings)
@@ -61,7 +61,7 @@ glimpse(turnover)
 skim(turnover)
 ```
 
-## Sumaŕio - Variáveis Categóricas
+## Sumário - Variáveis Categóricas
 
 ```{r}
 sumario_character <- turnover %>%
@@ -92,14 +92,14 @@ sumario_character %>%
     details = function(index) {
       variavel_chr <- sumario_character[index, "variavel", drop = TRUE]
       turnover %>%
-        tabyl(!!sym(variavel_chr)) %>%
+        tabyl(!!sym(variavel_chr)) %>% arrange(desc(n)) %>%
         reactable(columns = list(percent = colDef("%", format = colFormat(percent = TRUE, digits = 1))), width = 500)
     }
   )
 ```
 
 
-## Sumaŕio - Variáveis Numéricas
+## Sumário - Variáveis Numéricas
 
 ```{r}
 sumario_numeric <- turnover %>%
